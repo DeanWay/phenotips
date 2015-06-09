@@ -26,6 +26,8 @@ import org.apache.solr.client.solrj.util.ClientUtils;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.SolrInputDocument;
+import org.apache.solr.common.params.CommonParams;
+import org.apache.solr.common.params.SolrParams;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -34,21 +36,26 @@ import org.mockito.Matchers;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.internal.matchers.CapturingMatcher;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 import org.phenotips.vocabulary.SolrVocabularyResourceManager;
 import org.phenotips.vocabulary.Vocabulary;
 import org.phenotips.vocabulary.VocabularyTerm;
 import org.xwiki.component.manager.ComponentLookupException;
-import org.xwiki.component.phase.InitializationException;
 import org.xwiki.component.util.ReflectionUtils;
 import org.xwiki.test.mockito.MockitoComponentMockingRule;
 import org.xwiki.cache.Cache;
-
 import java.io.IOException;
 import java.util.Collection;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.argThat;
+import static org.mockito.Matchers.anyCollectionOf;
+
+
 
 
 public class GeneHGNCNomenclatureTest
@@ -114,7 +121,7 @@ public class GeneHGNCNomenclatureTest
 
         verify(this.server).deleteByQuery("*:*");
         verify(this.cache).removeAll();
-        verify(this.server).add((Collection<SolrInputDocument>) Matchers.anyCollection());
+        verify(this.server).add(anyCollectionOf(SolrInputDocument.class));
         verify(this.server).commit();
 
         Assert.assertEquals(0 , indexReturn);
@@ -122,18 +129,10 @@ public class GeneHGNCNomenclatureTest
     }
 
     @Test
-    public void testInitialize() throws ComponentLookupException, InitializationException
-    {
-        GeneHGNCNomenclature testInstance = (GeneHGNCNomenclature)this.mocker.getComponentUnderTest();
-        testInstance.initialize();
-
-    }
-
-    @Test
     public void testGetTermQueryConstruction() throws ComponentLookupException, IOException, SolrServerException
     {
         CapturingMatcher<SolrQuery> queryCapture = new CapturingMatcher<>();
-        when(this.server.query(Matchers.argThat(queryCapture))).thenReturn(response);
+        when(this.server.query(argThat(queryCapture))).thenReturn(response);
         when(this.response.getResults()).thenReturn(expectedDocList);
         this.mocker.getComponentUnderTest().getTerm("A1BG");
         Assert.assertEquals("symbol:A1BG OR prev_symbol:A1BG OR alias_symbol:A1BG",
@@ -147,7 +146,7 @@ public class GeneHGNCNomenclatureTest
             SolrServerException, ComponentLookupException
     {
         CapturingMatcher<SolrQuery> queryCapture = new CapturingMatcher<>();
-        when(this.server.query(Matchers.argThat(queryCapture))).thenReturn(this.response);
+        when(this.server.query(argThat(queryCapture))).thenReturn(this.response);
         when(this.response.getResults()).thenReturn(expectedDocList);
         this.mocker.getComponentUnderTest().getTerm("+-&&||!(){}[]^\"~*?:\\");
 
@@ -157,6 +156,19 @@ public class GeneHGNCNomenclatureTest
                 "OR alias_symbol:\\+\\-\\&\\&\\|\\|\\!\\(\\)\\{\\}\\[\\]\\^\\\"\\~\\*\\?\\:\\\\";
 
         Assert.assertEquals(escapeSequenceStr, queryCapture.getLastValue().getQuery());
+    }
+
+    @Test
+    public void getTermReturnsCorrectTerm() throws SolrServerException, ComponentLookupException, IOException
+    {
+        this.indexFromResource();
+        when(this.server.query((SolrParams) any())).thenAnswer(new QueryAnswer());
+        term = this.mocker.getComponentUnderTest().getTerm("TAAR1");
+        Assert.assertEquals("trace amine associated receptor 1", term.getName());
+        Assert.assertEquals("HGNC:17734", term.getId());
+        VocabularyTerm term = this.mocker.getComponentUnderTest().getTerm("T");
+        Assert.assertEquals("T, brachyury homolog (mouse)", term.getName());
+        Assert.assertEquals("HGNC:11515", term.getId());
     }
 
     @Test
@@ -182,7 +194,7 @@ public class GeneHGNCNomenclatureTest
     private void indexFromResource() throws IOException, SolrServerException, ComponentLookupException
     {
         CapturingMatcher<Collection<SolrInputDocument>> allTermsCap = new CapturingMatcher<>();
-        when(this.server.add(Matchers.argThat(allTermsCap))).thenReturn(new UpdateResponse());
+        when(this.server.add(argThat(allTermsCap))).thenReturn(new UpdateResponse());
 
         indexReturn = this.mocker.getComponentUnderTest().reindex(dataPath);
 
@@ -190,6 +202,36 @@ public class GeneHGNCNomenclatureTest
         solrDocList = new SolrDocumentList();
         for(SolrInputDocument i : allTerms) {
             solrDocList.add(ClientUtils.toSolrDocument(i));
+        }
+    }
+
+    private class QueryAnswer implements Answer<QueryResponse>
+    {
+
+        @Override
+        public QueryResponse answer(InvocationOnMock invocationOnMock) throws Throwable
+        {
+            SolrParams params = (SolrParams) invocationOnMock.getArguments()[0];
+            if (params == null || solrDocList == null) {
+                when(response.getResults()).thenReturn(mock(SolrDocumentList.class));
+                return response;
+            }
+            String qParams = params.get(CommonParams.Q);
+            for (SolrDocument item : solrDocList) {
+                String symbol = (String)item.getFieldValue("symbol");
+                String prevSymbol = (String)item.getFieldValue("prev_symbol");
+                String aliasSymbol = (String)item.getFieldValue("alias_symbol");
+                if ((symbol != null && qParams.contains(symbol))
+                        || (prevSymbol != null && qParams.contains(prevSymbol))
+                        || (aliasSymbol != null && qParams.contains(aliasSymbol))) {
+                    SolrDocumentList matchedItem = new SolrDocumentList();
+                    matchedItem.add(item);
+                    when(response.getResults()).thenReturn(matchedItem);
+                    return response;
+                }
+            }
+            when(response.getResults()).thenReturn(mock(SolrDocumentList.class));
+            return  response;
         }
     }
 
