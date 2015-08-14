@@ -62,5 +62,6 @@
     <module>pedigree</module>
     <module>proxy-authentication</module>
     <module>record-locking</module>
+    <module>active-installs</module>
   </modules>
 </project>
