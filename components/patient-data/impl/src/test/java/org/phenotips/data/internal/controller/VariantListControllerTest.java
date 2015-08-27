@@ -324,12 +324,12 @@ public class VariantListControllerTest
     @Test
     public void checkLoadParsingOfInheritanceKey() throws ComponentLookupException
     {
-        addVariantFields(INHERITANCE_KEY, new String[]{"denovo", "denovo_s_mosaicism", "SOME_STRING"});
+        addVariantFields(INHERITANCE_KEY, new String[]{"denovo_germline", "denovo_s_mosaicism", "SOME_STRING"});
 
         PatientData<Map<String, String>> result = this.mocker.getComponentUnderTest().load(this.patient);
 
         Assert.assertNotNull(result);
-        Assert.assertEquals("de novo", result.get(0).get(INHERITANCE_KEY));
+        Assert.assertEquals("de novo germline", result.get(0).get(INHERITANCE_KEY));
         Assert.assertEquals("de novo somatic mosaicism", result.get(1).get(INHERITANCE_KEY));
         Assert.assertEquals("SOME_STRING", result.get(2).get(INHERITANCE_KEY));
     }
@@ -541,12 +541,15 @@ public class VariantListControllerTest
         patientData = new IndexedPatientData<>(CONTROLLER_NAME, internalList);
         doReturn(patientData).when(this.patient).getData(CONTROLLER_NAME);
         selectedFields = new LinkedList<>();
+        selectedFields.add(VARIANTS_ENABLING_FIELD_NAME);
 
         this.mocker.getComponentUnderTest().writeJSON(this.patient, json, selectedFields);
+
         Assert.assertNotNull(json.get(CONTROLLER_NAME));
         Assert.assertTrue(json.get(CONTROLLER_NAME) instanceof JSONArray);
         item = (Map<String, String>)json.getJSONArray(CONTROLLER_NAME).get(0);
-        Assert.assertTrue(item.isEmpty());
+        Assert.assertEquals("variantName", item.get(VARIANT_KEY));
+        Assert.assertEquals(1, item.size());
     }
 
     // ----------------------------------------Private methods----------------------------------------
